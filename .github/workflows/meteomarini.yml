@@ -1,10 +1,17 @@
-name: Aggiorna dati meteomarini Venezia
+ name: Aggiorna dati meteomarini Venezia
 
 on:
   schedule:
     # Ogni 15 minuti (i dati sorgente si aggiornano ogni 5 min con 3 min di ritardo)
     - cron: '*/15 * * * *'
   workflow_dispatch: {}  # permette di lanciarlo manualmente da GitHub
+
+# Impedisce a due esecuzioni di girare in parallelo: se ne parte una nuova mentre
+# una precedente non ha ancora finito, questa nuova aspetta in coda invece di
+# rischiare un conflitto di push con la vecchia.
+concurrency:
+  group: fetch-meteomarini
+  cancel-in-progress: false
 
 permissions:
   contents: write  # serve per poter fare il commit/push
@@ -57,5 +64,8 @@ jobs:
             echo "Nessun cambiamento nei dati, salto il commit."
           else
             git commit -m "Aggiornamento dati meteomarini $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            # Rete di sicurezza: se nel frattempo il remoto è avanzato, riallinea
+            # la nostra modifica sopra l'ultimo commit remoto prima di pushare.
+            git pull --rebase origin main
             git push
           fi
