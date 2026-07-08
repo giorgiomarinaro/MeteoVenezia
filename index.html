@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Osservatorio Laguna — dati meteomarini Venezia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e2c33;
+    --bg-deep: #081d22;
+    --panel: #143c44;
+    --panel-alt: #1b4750;
+    --brass: #c9a227;
+    --brass-dim: #8a7228;
+    --ink: #ede6d6;
+    --ink-dim: #a9bcb9;
+    --alert: #b3462f;
+    --warn: #c99a2e;
+    --good: #6b8f71;
+    --hairline: rgba(201,162,39,0.25);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: radial-gradient(ellipse at 50% -10%, var(--panel) 0%, var(--bg) 45%, var(--bg-deep) 100%);
+    background-attachment: fixed;
+    color: var(--ink);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--brass); }
+
+  .mono {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .page {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+  }
+
+  /* ---------- Header ---------- */
+  .masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 16px;
+    border-bottom: 1px solid var(--hairline);
+    padding-bottom: 18px;
+    margin-bottom: 30px;
+  }
+
+  .eyebrow {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin-bottom: 6px;
+  }
+
+  .masthead h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: clamp(28px, 4vw, 40px);
+    margin: 0;
+    letter-spacing: 0.01em;
+  }
+
+  .status-block {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .refresh-btn {
+    background: var(--panel-alt);
+    border: 1px solid var(--hairline);
+    color: var(--brass);
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    font-size: 16px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.4s ease, background 0.2s ease;
+  }
+  .refresh-btn:hover { background: var(--panel); }
+  .refresh-btn:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .refresh-btn.spinning { transform: rotate(360deg); }
+
+  /* ---------- Hero gauge ---------- */
+  .hero-gauge {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-alt) 100%);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    padding: 28px clamp(16px, 4vw, 40px) 10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 20px 40px;
+    margin-bottom: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero-gauge::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(115deg, rgba(255,255,255,0.015) 0 2px, transparent 2px 40px);
+    pointer-events: none;
+  }
+
+  .gauge { width: min(340px, 90vw); height: auto; }
+
+  .gauge-tick-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    fill: var(--ink-dim);
+  }
+
+  .gauge-zone { fill: none; stroke-width: 14; stroke-linecap: round; }
+  .zone-good { stroke: var(--good); opacity: 0.85; }
+  .zone-warn { stroke: var(--warn); opacity: 0.85; }
+  .zone-alert { stroke: var(--alert); opacity: 0.9; }
+
+  .gauge-needle {
+    stroke: var(--brass);
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+  .gauge-pivot { fill: var(--brass); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    #needle-group { transition: transform 0.9s cubic-bezier(.2,.8,.2,1); }
+  }
+
+  .hero-readout {
+    text-align: center;
+    min-width: 180px;
+  }
+
+  .hero-value {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 6px;
+  }
+  .hero-value .mono {
+    font-size: clamp(40px, 7vw, 58px);
+    font-weight: 500;
+    color: var(--ink);
+    line-height: 1;
+  }
+  .hero-value .unit {
+    font-size: 16px;
+    color: var(--brass);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .hero-label {
+    font-family: 'Fraunces', serif;
+    font-size: 15px;
+    color: var(--ink-dim);
+    margin-top: 6px;
+  }
+  .hero-status {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--hairline);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .hero-time {
+    font-size: 11px;
+    color: var(--ink-dim);
+    margin-top: 10px;
+  }
+
+  /* ---------- Instrument grid ---------- */
+  .instrument-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 16px 18px;
+    position: relative;
+  }
+  .card::after {
+    content: "";
+    position: absolute;
+    top: 10px; right: 10px;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--brass-dim);
+  }
+
+  .card-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin-bottom: 10px;
+  }
+
+  .card-value {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+  }
+  .card-value .mono {
+    font-size: 26px;
+    color: var(--ink);
+  }
+  .card-value .unit {
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .card-meta {
+    margin-top: 8px;
+    font-size: 11.5px;
+    color: var(--ink-dim);
+    line-height: 1.5;
+  }
+
+  .card-error {
+    color: var(--ink-dim);
+    font-size: 12.5px;
+    font-style: italic;
+  }
+
+  details.raw {
+    margin-top: 10px;
+  }
+  details.raw summary {
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--brass-dim);
+    letter-spacing: 0.04em;
+  }
+  details.raw summary:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  details.raw pre {
+    margin-top: 8px;
+    background: var(--bg-deep);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 10.5px;
+    line-height: 1.5;
+    max-height: 200px;
+    overflow: auto;
+    color: var(--ink-dim);
+  }
+
+  /* ---------- Footer ---------- */
+  .masthead-footer {
+    margin-top: 36px;
+    padding-top: 16px;
+    border-top: 1px solid var(--hairline);
+    font-size: 12px;
+    color: var(--ink-dim);
+    text-align: center;
+  }
+  .masthead-footer p { margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="title-block">
+      <span class="eyebrow">Osservatorio meteomarino</span>
+      <h1>Laguna &amp; litorale di Venezia</h1>
+    </div>
+    <div class="status-block">
+      <span class="mono" id="last-updated">aggiornamento — caricamento…</span>
+      <button class="refresh-btn" id="refresh-btn" aria-label="Aggiorna dati" title="Aggiorna dati">↻</button>
+    </div>
+  </header>
+
+  <section class="hero-gauge" aria-label="Livello di marea attuale">
+    <svg class="gauge" viewBox="-10 0 340 210" role="img" aria-labelledby="gauge-title">
+      <title id="gauge-title">Quadrante del livello di marea</title>
+
+      <path class="gauge-zone zone-good"  d="M 20,190 A 140 140 0 0 1 222.3,64.6" />
+      <path class="gauge-zone zone-warn"  d="M 222.3,64.6 A 140 140 0 0 1 279.0,116.3" />
+      <path class="gauge-zone zone-alert" d="M 279.0,116.3 A 140 140 0 0 1 300,190" />
+
+      <text class="gauge-tick-label" x="-5" y="203" text-anchor="middle">-30</text>
+      <text class="gauge-tick-label" x="19" y="98" text-anchor="middle">0</text>
+      <text class="gauge-tick-label" x="233" y="38" text-anchor="middle">80</text>
+      <text class="gauge-tick-label" x="303" y="98" text-anchor="start">110</text>
+      <text class="gauge-tick-label" x="322" y="203" text-anchor="middle">140 cm</text>
+
+      <g id="needle-group" style="transform-origin: 160px 190px;">
+        <line class="gauge-needle" x1="160" y1="190" x2="160" y2="66" />
+      </g>
+      <circle class="gauge-pivot" cx="160" cy="190" r="6" />
+    </svg>
+
+    <div class="hero-readout">
+      <div class="hero-value">
+        <span class="mono" id="livello-value">—</span>
+        <span class="unit">cm</span>
+      </div>
+      <div class="hero-label">Livello di marea</div>
+      <span class="hero-status" id="livello-status" style="color: var(--ink-dim); border-color: var(--hairline);">in attesa</span>
+      <div class="hero-time mono" id="livello-time">—</div>
+      <details class="raw">
+        <summary>dati grezzi</summary>
+        <pre id="livello-raw">—</pre>
+      </details>
+    </div>
+  </section>
+
+  <section class="instrument-grid" id="grid"></section>
+
+  <footer class="masthead-footer">
+    <p>Fonte dati: <a href="https://dati.venezia.it/?q=content/cpsm-dati-meteomarini-laguna-e-litorale-veneziano" target="_blank" rel="noopener">ICPSM — Comune di Venezia</a>, licenza CC-BY. Dati grezzi automatici, non validati.</p>
+    <p id="footer-updated" class="mono"></p>
+  </footer>
+
+</div>
+
+<script>
+  // ---------- Configurazione dataset ----------
+  // valueKeys / stationKeys / timeKeys sono tentativi: se non trovano corrispondenza
+  // il parser cerca comunque il primo campo numerico plausibile nell'oggetto.
+  const DATASETS = [
+    { id: 'vento',        file: 'vento.json',        label: 'Vento',              unit: 'm/s',  valueKeys: ['velocita','vel','speed','velocitavento'] },
+    { id: 'pressione',    file: 'pressione.json',    label: 'Pressione',         unit: 'hPa',  valueKeys: ['pressione','press'] },
+    { id: 'temparia',     file: 'temparia.json',     label: 'Temperatura aria',  unit: '°C',   valueKeys: ['temperatura','temp','temparia'] },
+    { id: 'tempacqua',    file: 'tempacqua.json',    label: 'Temperatura acqua', unit: '°C',   valueKeys: ['temperatura','temp','tempacqua'] },
+    { id: 'umidita',      file: 'umidita.json',      label: 'Umidità',           unit: '%',    valueKeys: ['umidita','umidità','ur'] },
+    { id: 'onde_laguna',  file: 'onde_laguna.json',  label: 'Onde — laguna',     unit: 'm',    valueKeys: ['altezzaonda','hs','altezza'] },
+    { id: 'onde_mare',    file: 'onde_mare.json',    label: 'Onde — mare',       unit: 'm',    valueKeys: ['altezzaonda','hs','altezza'] },
+    { id: 'radiazione',   file: 'radiazione.json',   label: 'Radiazione solare', unit: 'W/m²', valueKeys: ['radiazione','rad'] },
+    { id: 'previsione',   file: 'previsione.json',   label: 'Previsione marea',  unit: 'cm',   valueKeys: ['previsione','valore','livello'] },
+  ];
+
+  const EXCLUDE_NUMERIC = ['lat','lon','latitude','longitude','id','codice','anno','mese','giorno','ora','minuto','secondo','x','y','quota'];
+  const STATION_KEYS = ['denominazione','nome','stazione','name','label','postazione','sensore'];
+  const TIME_KEYS = ['data','datetime','timestamp','time','ora','data_ora','dataora'];
+
+  const norm = k => k.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  function findByCandidates(obj, candidates) {
+    const keys = Object.keys(obj);
+    for (const c of candidates) {
+      const hit = keys.find(k => norm(k) === norm(c));
+      if (hit !== undefined) return { key: hit, value: obj[hit] };
+    }
+    return null;
+  }
+
+  function findFirstNumeric(obj) {
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === 'number' && !EXCLUDE_NUMERIC.some(ex => norm(k).includes(norm(ex)))) {
+        return { key: k, value: v };
+      }
+      if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) && !EXCLUDE_NUMERIC.some(ex => norm(k).includes(norm(ex)))) {
+        return { key: k, value: Number(v) };
+      }
+    }
+    return null;
+  }
+
+  function pickLatestRecord(json) {
+    if (Array.isArray(json)) {
+      if (json.length === 0) return null;
+      // prova a ordinare per un campo temporale, altrimenti prende l'ultimo elemento
+      const withTime = json.map(r => {
+        const t = findByCandidates(r, TIME_KEYS);
+        const parsed = t ? Date.parse(t.value) : NaN;
+        return { r, ts: isNaN(parsed) ? null : parsed };
+      });
+      if (withTime.some(w => w.ts !== null)) {
+        withTime.sort((a, b) => (b.ts ?? -Infinity) - (a.ts ?? -Infinity));
+        return withTime[0].r;
+      }
+      return json[json.length - 1];
+    }
+    if (json && typeof json === 'object') return json;
+    return null;
+  }
+
+  function extractReading(record, valueKeys) {
+    const val = findByCandidates(record, valueKeys) || findFirstNumeric(record);
+    const station = findByCandidates(record, STATION_KEYS);
+    const time = findByCandidates(record, TIME_KEYS);
+    return {
+      value: val ? val.value : null,
+      station: station ? station.value : null,
+      time: time ? time.value : null,
+    };
+  }
+
+  function formatTime(raw) {
+    if (!raw) return null;
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return String(raw);
+    return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function fetchJson(file) {
+    const res = await fetch(`data/${file}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  // ---------- Quadrante livello di marea ----------
+  const GAUGE_MIN = -30, GAUGE_MAX = 140;
+
+  function updateGauge(value) {
+    const clamped = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, value));
+    const percent = (clamped - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN);
+    const theta = 180 - percent * 180;      // 180° = min (sinistra), 0° = max (destra)
+    const rotateDeg = 90 - theta;           // rispetto alla lancetta disegnata verticale (90°)
+    document.getElementById('needle-group').style.transform = `rotate(${rotateDeg}deg)`;
+
+    const statusEl = document.getElementById('livello-status');
+    if (value >= 110) {
+      statusEl.textContent = 'acqua alta';
+      statusEl.style.color = 'var(--alert)';
+      statusEl.style.borderColor = 'var(--alert)';
+    } else if (value >= 80) {
+      statusEl.textContent = 'attenzione';
+      statusEl.style.color = 'var(--warn)';
+      statusEl.style.borderColor = 'var(--warn)';
+    } else {
+      statusEl.textContent = 'nella norma';
+      statusEl.style.color = 'var(--good)';
+      statusEl.style.borderColor = 'var(--good)';
+    }
+  }
+
+  async function loadLivello() {
+    try {
+      const json = await fetchJson('livello.json');
+      const record = pickLatestRecord(json);
+      document.getElementById('livello-raw').textContent = JSON.stringify(json, null, 2).slice(0, 3000);
+      if (!record) throw new Error('nessun dato');
+      const { value, station, time } = extractReading(record, ['livello','valore','value','altezza']);
+      if (value === null) throw new Error('valore non riconosciuto');
+
+      document.getElementById('livello-value').textContent = value.toFixed(1);
+      document.getElementById('livello-time').textContent =
+        (station ? station + ' — ' : '') + (formatTime(time) || 'ora non disponibile');
+      updateGauge(value);
+    } catch (err) {
+      document.getElementById('livello-value').textContent = '—';
+      document.getElementById('livello-time').textContent = 'dato non disponibile';
+      document.getElementById('livello-raw').textContent = String(err);
+    }
+  }
+
+  // ---------- Schede strumenti ----------
+  function buildCardShell(ds) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.id = `card-${ds.id}`;
+    card.innerHTML = `
+      <div class="card-label">${ds.label}</div>
+      <div class="card-value">
+        <span class="mono" id="${ds.id}-value">—</span>
+        <span class="unit">${ds.unit}</span>
+      </div>
+      <div class="card-meta" id="${ds.id}-meta">caricamento…</div>
+      <details class="raw">
+        <summary>dati grezzi</summary>
+        <pre id="${ds.id}-raw">—</pre>
+      </details>
+    `;
+    return card;
+  }
+
+  async function loadDataset(ds) {
+    const valueEl = document.getElementById(`${ds.id}-value`);
+    const metaEl = document.getElementById(`${ds.id}-meta`);
+    const rawEl = document.getElementById(`${ds.id}-raw`);
+    try {
+      const json = await fetchJson(ds.file);
+      rawEl.textContent = JSON.stringify(json, null, 2).slice(0, 3000);
+      const record = pickLatestRecord(json);
+      if (!record) throw new Error('nessun dato');
+      const { value, station, time } = extractReading(record, ds.valueKeys);
+      if (value === null) {
+        metaEl.innerHTML = `<span class="card-error">campo non riconosciuto — vedi dati grezzi</span>`;
+        return;
+      }
+      valueEl.textContent = typeof value === 'number' ? value.toFixed(1) : value;
+      metaEl.textContent = [station, formatTime(time)].filter(Boolean).join(' — ') || 'aggiornato';
+    } catch (err) {
+      metaEl.innerHTML = `<span class="card-error">dato non disponibile</span>`;
+      rawEl.textContent = String(err);
+    }
+  }
+
+  async function loadAll() {
+    document.getElementById('last-updated').textContent = 'aggiornamento — in corso…';
+    await loadLivello();
+    await Promise.all(DATASETS.map(loadDataset));
+
+    try {
+      const meta = await fetchJson('last_updated.json');
+      const t = formatTime(meta.last_updated);
+      document.getElementById('last-updated').textContent = `ultimo aggiornamento — ${t || meta.last_updated}`;
+      document.getElementById('footer-updated').textContent = `dati sincronizzati: ${t || meta.last_updated}`;
+    } catch {
+      document.getElementById('last-updated').textContent = 'ultimo aggiornamento — n/d';
+    }
+  }
+
+  // ---------- Init ----------
+  const grid = document.getElementById('grid');
+  DATASETS.forEach(ds => grid.appendChild(buildCardShell(ds)));
+
+  document.getElementById('refresh-btn').addEventListener('click', (e) => {
+    e.currentTarget.classList.add('spinning');
+    loadAll().finally(() => setTimeout(() => e.currentTarget.classList.remove('spinning'), 500));
+  });
+
+  loadAll();
+  setInterval(loadAll, 5 * 60 * 1000); // auto-refresh ogni 5 minuti
+</script>
+
+</body>
+</html>
