@@ -3,7 +3,7 @@ name: Aggiorna dati meteomarini Venezia
 on:
   schedule:
     # Ogni 15 minuti (i dati sorgente si aggiornano ogni 5 min con 3 min di ritardo)
-    - cron: '*/15 * * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch: {}  # permette di lanciarlo manualmente da GitHub
 
 # Impedisce a due esecuzioni di girare in parallelo: se ne parte una nuova mentre
