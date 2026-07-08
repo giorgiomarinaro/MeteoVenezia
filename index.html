@@ -445,10 +445,43 @@
     };
   }
 
+  // Fonte diretta: chiamiamo dati.venezia.it dal browser di chi visita la pagina,
+  // invece di passare da una copia pre-scaricata. Se il browser blocca la richiesta
+  // per CORS, ritentiamo automaticamente passando da un proxy pubblico di sola lettura
+  // (i dati sono comunque pubblici e in CC-BY, quindi il rischio è minimo).
+  const SOURCE_BASE = 'https://dati.venezia.it/sites/default/files/dataset/opendata';
+  const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
   async function fetchJson(file) {
-    const res = await fetch(`data/${file}?t=${Date.now()}`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    const targetUrl = `${SOURCE_BASE}/${file}?t=${Date.now()}`;
+    try {
+      const res = await fetch(targetUrl, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (directErr) {
+      try {
+        const proxied = await fetch(`${CORS_PROXY}${encodeURIComponent(targetUrl)}`, { cache: 'no-store' });
+        if (!proxied.ok) throw new Error(`HTTP ${proxied.status}`);
+        return await proxied.json();
+      } catch (proxyErr) {
+        throw new Error(`diretto: ${directErr.message} — proxy: ${proxyErr.message}`);
+      }
+    }
+  }
+
+  // Non avendo più un file last_updated.json generato da un job esterno, mostriamo
+  // il timestamp più recente trovato tra i dati appena scaricati: dice a chi guarda
+  // quanto è "fresca" la lettura dei sensori, non solo quando ha caricato la pagina.
+  function freshestTimestamp() {
+    let maxTs = null;
+    const entries = [cache['livello'], ...DATASETS.map(ds => cache[ds.id])].filter(Boolean);
+    entries.forEach(entry => {
+      entry.valid.forEach(r => {
+        const t = Date.parse(String(r.data || '').replace(' ', 'T'));
+        if (!isNaN(t) && (maxTs === null || t > maxTs)) maxTs = t;
+      });
+    });
+    return maxTs;
   }
 
   // ---------- Tendina globale di scelta stazione ----------
@@ -614,13 +647,13 @@
     populateGlobalStationSelect();
     renderAllForStation(document.getElementById('station-select').value);
 
-    try {
-      const meta = await fetchJson('last_updated.json');
-      const t = formatTime(meta.last_updated);
-      document.getElementById('last-updated').textContent = `ultimo aggiornamento — ${t || meta.last_updated}`;
-      document.getElementById('footer-updated').textContent = `dati sincronizzati: ${t || meta.last_updated}`;
-    } catch {
-      document.getElementById('last-updated').textContent = 'ultimo aggiornamento — n/d';
+    const freshTs = freshestTimestamp();
+    if (freshTs !== null) {
+      const t = formatTime(new Date(freshTs).toISOString());
+      document.getElementById('last-updated').textContent = `dato più recente — ${t}`;
+      document.getElementById('footer-updated').textContent = `pagina caricata alle ${formatTime(new Date().toISOString())} — dato sensori più recente: ${t}`;
+    } else {
+      document.getElementById('last-updated').textContent = 'dati non disponibili al momento';
     }
   }
 
