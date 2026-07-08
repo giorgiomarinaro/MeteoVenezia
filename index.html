@@ -230,6 +230,43 @@
     margin-bottom: 10px;
   }
 
+  .station-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 12px 20px;
+    margin-bottom: 22px;
+  }
+  .station-bar-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+
+  .station-select {
+    background: var(--bg-deep);
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .station-select:hover { border-color: var(--brass-dim); }
+  .station-select:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+  .station-select-global {
+    min-width: 260px;
+  }
+
   .card-value {
     display: flex;
     align-items: baseline;
@@ -305,6 +342,11 @@
       <button class="refresh-btn" id="refresh-btn" aria-label="Aggiorna dati" title="Aggiorna dati">↻</button>
     </div>
   </header>
+
+  <section class="station-bar">
+    <label for="station-select" class="station-bar-label">Stazione di osservazione</label>
+    <select id="station-select" class="station-select station-select-global" aria-label="Scegli la stazione di osservazione"></select>
+  </section>
 
   <section class="hero-gauge" aria-label="Livello di marea attuale">
     <svg class="gauge" viewBox="-10 0 340 210" role="img" aria-labelledby="gauge-title">
@@ -385,22 +427,20 @@
     return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
-  // Sceglie la stazione preferita tra i record che hanno sia "data" che "valore" validi;
-  // se quella preferita non ha dati, prende la prima disponibile nell'array.
-  function pickRecord(json, preferStation) {
-    if (!Array.isArray(json) || json.length === 0) return null;
-    const valid = json.filter(r => r.data && r.valore);
-    if (valid.length === 0) return null;
-    const preferred = preferStation && valid.find(r => r.stazione === preferStation);
-    return preferred || valid[0];
-  }
+  // Cache dei dati già scaricati per ciascun dataset, così cambiare stazione
+  // dalla tendina globale ridisegna tutto all'istante senza rifare il fetch.
+  const cache = {}; // chiave: 'livello' oppure ds.id -> { valid: [...record...] }
+
+  // Stazione di default: quella più vicina alla Giudecca nei dati di dati.venezia.it
+  // è letteralmente il sensore "Punta Salute Canale Giudecca", posizionato di
+  // fronte all'isola sul lato del canale della Giudecca.
+  const DEFAULT_STATION = 'Punta Salute Canale Giudecca';
 
   function extractReading(record, valueIndex) {
-    if (!record) return { value: null, station: null, time: null };
+    if (!record) return { value: null, time: null };
     const numbers = extractNumbers(record.valore);
     return {
       value: numbers.length > valueIndex ? numbers[valueIndex] : null,
-      station: record.stazione || null,
       time: record.data || null,
     };
   }
@@ -409,6 +449,39 @@
     const res = await fetch(`data/${file}?t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
+  }
+
+  // ---------- Tendina globale di scelta stazione ----------
+  // Unione di tutte le stazioni con dati validi tra tutti i dataset già scaricati.
+  function collectAllStations() {
+    const set = new Set();
+    if (cache['livello']) cache['livello'].valid.forEach(r => set.add(r.stazione));
+    DATASETS.forEach(ds => {
+      if (cache[ds.id]) cache[ds.id].valid.forEach(r => set.add(r.stazione));
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'it'));
+  }
+
+  function populateGlobalStationSelect() {
+    const selectEl = document.getElementById('station-select');
+    const stations = collectAllStations();
+    const previousValue = selectEl.value;
+    selectEl.innerHTML = '';
+    stations.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      selectEl.appendChild(opt);
+    });
+    const stillValid = previousValue && stations.includes(previousValue);
+    selectEl.value = stillValid
+      ? previousValue
+      : (stations.includes(DEFAULT_STATION) ? DEFAULT_STATION : (stations[0] || ''));
+  }
+
+  function renderAllForStation(stationName) {
+    renderLivello(stationName);
+    DATASETS.forEach(ds => renderDataset(ds, stationName));
   }
 
   // ---------- Quadrante livello di marea ----------
@@ -437,23 +510,43 @@
     }
   }
 
+  function renderLivello(stationName) {
+    const entry = cache['livello'];
+    const valueEl = document.getElementById('livello-value');
+    const timeEl = document.getElementById('livello-time');
+    const statusEl = document.getElementById('livello-status');
+    if (!entry) return;
+
+    const record = entry.valid.find(r => r.stazione === stationName);
+    if (!record) {
+      valueEl.textContent = '—';
+      timeEl.textContent = 'non disponibile per questa stazione';
+      statusEl.textContent = 'n/d';
+      statusEl.style.color = 'var(--ink-dim)';
+      statusEl.style.borderColor = 'var(--hairline)';
+      return;
+    }
+    const { value, time } = extractReading(record, 0); // "0.55 m" -> metri
+    if (value === null) {
+      valueEl.textContent = '—';
+      timeEl.textContent = 'valore non riconosciuto';
+      return;
+    }
+    const cm = value * 100; // il quadrante è tarato in centimetri
+    valueEl.textContent = cm.toFixed(0);
+    timeEl.textContent = formatTime(time) || 'ora non disponibile';
+    updateGauge(cm);
+  }
+
   async function loadLivello() {
     try {
       const json = await fetchJson('livello.json');
       document.getElementById('livello-raw').textContent = JSON.stringify(json, null, 2).slice(0, 3000);
-      const record = pickRecord(json, 'Punta Salute Canal Grande');
-      if (!record) throw new Error('nessun dato');
-      const { value, station, time } = extractReading(record, 0); // "0.55 m" -> metri
-      if (value === null) throw new Error('valore non riconosciuto');
-
-      const cm = value * 100; // il quadrante è tarato in centimetri
-      document.getElementById('livello-value').textContent = cm.toFixed(0);
-      document.getElementById('livello-time').textContent =
-        (station ? station + ' — ' : '') + (formatTime(time) || 'ora non disponibile');
-      updateGauge(cm);
+      const valid = Array.isArray(json) ? json.filter(r => r.data && r.valore) : [];
+      if (valid.length === 0) throw new Error('nessuna stazione con dati validi');
+      cache['livello'] = { valid };
     } catch (err) {
-      document.getElementById('livello-value').textContent = '—';
-      document.getElementById('livello-time').textContent = 'dato non disponibile';
+      cache['livello'] = { valid: [] };
       document.getElementById('livello-raw').textContent = String(err);
     }
   }
@@ -478,24 +571,37 @@
     return card;
   }
 
-  async function loadDataset(ds) {
+  function renderDataset(ds, stationName) {
+    const entry = cache[ds.id];
     const valueEl = document.getElementById(`${ds.id}-value`);
     const metaEl = document.getElementById(`${ds.id}-meta`);
+    if (!entry) return;
+
+    const record = entry.valid.find(r => r.stazione === stationName);
+    if (!record) {
+      valueEl.textContent = '—';
+      metaEl.innerHTML = `<span class="card-error">non disponibile per questa stazione</span>`;
+      return;
+    }
+    const { value, time } = extractReading(record, ds.valueIndex);
+    if (value === null) {
+      valueEl.textContent = '—';
+      metaEl.innerHTML = `<span class="card-error">campo non riconosciuto — vedi dati grezzi</span>`;
+      return;
+    }
+    valueEl.textContent = value.toFixed(1);
+    metaEl.textContent = formatTime(time) || 'aggiornato';
+  }
+
+  async function loadDataset(ds) {
     const rawEl = document.getElementById(`${ds.id}-raw`);
     try {
       const json = await fetchJson(ds.file);
       rawEl.textContent = JSON.stringify(json, null, 2).slice(0, 3000);
-      const record = pickRecord(json, ds.preferStation);
-      if (!record) throw new Error('nessuna stazione con dati validi');
-      const { value, station, time } = extractReading(record, ds.valueIndex);
-      if (value === null) {
-        metaEl.innerHTML = `<span class="card-error">campo non riconosciuto — vedi dati grezzi</span>`;
-        return;
-      }
-      valueEl.textContent = value.toFixed(1);
-      metaEl.textContent = [station, formatTime(time)].filter(Boolean).join(' — ') || 'aggiornato';
+      const valid = Array.isArray(json) ? json.filter(r => r.data && r.valore) : [];
+      cache[ds.id] = { valid };
     } catch (err) {
-      metaEl.innerHTML = `<span class="card-error">dato non disponibile</span>`;
+      cache[ds.id] = { valid: [] };
       rawEl.textContent = String(err);
     }
   }
@@ -504,6 +610,9 @@
     document.getElementById('last-updated').textContent = 'aggiornamento — in corso…';
     await loadLivello();
     await Promise.all(DATASETS.map(loadDataset));
+
+    populateGlobalStationSelect();
+    renderAllForStation(document.getElementById('station-select').value);
 
     try {
       const meta = await fetchJson('last_updated.json');
@@ -518,6 +627,10 @@
   // ---------- Init ----------
   const grid = document.getElementById('grid');
   DATASETS.forEach(ds => grid.appendChild(buildCardShell(ds)));
+
+  // Cambiare stazione dalla tendina globale ridisegna subito tutte le schede
+  // usando i dati già in cache, senza richiedere di nuovo i JSON alla rete.
+  document.getElementById('station-select').addEventListener('change', e => renderAllForStation(e.target.value));
 
   document.getElementById('refresh-btn').addEventListener('click', (e) => {
     e.currentTarget.classList.add('spinning');
