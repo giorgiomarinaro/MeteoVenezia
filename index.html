@@ -352,82 +352,57 @@
 
 <script>
   // ---------- Configurazione dataset ----------
-  // valueKeys / stationKeys / timeKeys sono tentativi: se non trovano corrispondenza
-  // il parser cerca comunque il primo campo numerico plausibile nell'oggetto.
+  // "valore" nei JSON di dati.venezia.it è sempre una stringa con l'unità incorporata,
+  // es. "0.55 m", "28.4 °C", "61 gradi, 4.1 m/s, 4.9 m/s". valueIndex sceglie quale
+  // numero prendere quando la stringa contiene più valori separati da virgola
+  // (per il vento: 0=direzione gradi, 1=velocità media, 2=raffica).
   const DATASETS = [
-    { id: 'vento',        file: 'vento.json',        label: 'Vento',              unit: 'm/s',  valueKeys: ['velocita','vel','speed','velocitavento'] },
-    { id: 'pressione',    file: 'pressione.json',    label: 'Pressione',         unit: 'hPa',  valueKeys: ['pressione','press'] },
-    { id: 'temparia',     file: 'temparia.json',     label: 'Temperatura aria',  unit: '°C',   valueKeys: ['temperatura','temp','temparia'] },
-    { id: 'tempacqua',    file: 'tempacqua.json',    label: 'Temperatura acqua', unit: '°C',   valueKeys: ['temperatura','temp','tempacqua'] },
-    { id: 'umidita',      file: 'umidita.json',      label: 'Umidità',           unit: '%',    valueKeys: ['umidita','umidità','ur'] },
-    { id: 'onde_laguna',  file: 'onde_laguna.json',  label: 'Onde — laguna',     unit: 'm',    valueKeys: ['altezzaonda','hs','altezza'] },
-    { id: 'onde_mare',    file: 'onde_mare.json',    label: 'Onde — mare',       unit: 'm',    valueKeys: ['altezzaonda','hs','altezza'] },
-    { id: 'radiazione',   file: 'radiazione.json',   label: 'Radiazione solare', unit: 'W/m²', valueKeys: ['radiazione','rad'] },
-    { id: 'previsione',   file: 'previsione.json',   label: 'Previsione marea',  unit: 'cm',   valueKeys: ['previsione','valore','livello'] },
+    { id: 'vento',        file: 'vento.json',        label: 'Vento',              unit: 'm/s',  valueIndex: 1, preferStation: 'Piattaforma Acqua Alta Siap' },
+    { id: 'pressione',    file: 'pressione.json',    label: 'Pressione',         unit: 'hPa',  valueIndex: 0, preferStation: 'Piattaforma Acqua Alta Siap' },
+    { id: 'temparia',     file: 'temparia.json',     label: 'Temperatura aria',  unit: '°C',   valueIndex: 0, preferStation: 'Piattaforma Acqua Alta Siap' },
+    { id: 'tempacqua',    file: 'tempacqua.json',    label: 'Temperatura acqua', unit: '°C',   valueIndex: 0, preferStation: 'Punta Salute Canal Grande' },
+    { id: 'umidita',      file: 'umidita.json',      label: 'Umidità',           unit: '%',    valueIndex: 0, preferStation: 'Piattaforma Acqua Alta Siap' },
+    { id: 'onde_laguna',  file: 'onde_laguna.json',  label: 'Onde — laguna',     unit: 'm',    valueIndex: 0, preferStation: 'Punta Salute Canal Grande' },
+    { id: 'onde_mare',    file: 'onde_mare.json',    label: 'Onde — mare',       unit: 'm',    valueIndex: 0, preferStation: 'Piattaforma Acqua Alta Siap' },
+    { id: 'radiazione',   file: 'radiazione.json',   label: 'Radiazione solare', unit: 'W/m²', valueIndex: 0, preferStation: 'Piattaforma Acqua Alta Siap' },
   ];
 
-  const EXCLUDE_NUMERIC = ['lat','lon','latitude','longitude','id','codice','anno','mese','giorno','ora','minuto','secondo','x','y','quota'];
-  const STATION_KEYS = ['denominazione','nome','stazione','name','label','postazione','sensore'];
-  const TIME_KEYS = ['data','datetime','timestamp','time','ora','data_ora','dataora'];
+  const norm = s => (s || '').toLowerCase().trim();
 
-  const norm = k => k.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  function findByCandidates(obj, candidates) {
-    const keys = Object.keys(obj);
-    for (const c of candidates) {
-      const hit = keys.find(k => norm(k) === norm(c));
-      if (hit !== undefined) return { key: hit, value: obj[hit] };
-    }
-    return null;
-  }
-
-  function findFirstNumeric(obj) {
-    for (const [k, v] of Object.entries(obj)) {
-      if (typeof v === 'number' && !EXCLUDE_NUMERIC.some(ex => norm(k).includes(norm(ex)))) {
-        return { key: k, value: v };
-      }
-      if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)) && !EXCLUDE_NUMERIC.some(ex => norm(k).includes(norm(ex)))) {
-        return { key: k, value: Number(v) };
-      }
-    }
-    return null;
-  }
-
-  function pickLatestRecord(json) {
-    if (Array.isArray(json)) {
-      if (json.length === 0) return null;
-      // prova a ordinare per un campo temporale, altrimenti prende l'ultimo elemento
-      const withTime = json.map(r => {
-        const t = findByCandidates(r, TIME_KEYS);
-        const parsed = t ? Date.parse(t.value) : NaN;
-        return { r, ts: isNaN(parsed) ? null : parsed };
-      });
-      if (withTime.some(w => w.ts !== null)) {
-        withTime.sort((a, b) => (b.ts ?? -Infinity) - (a.ts ?? -Infinity));
-        return withTime[0].r;
-      }
-      return json[json.length - 1];
-    }
-    if (json && typeof json === 'object') return json;
-    return null;
-  }
-
-  function extractReading(record, valueKeys) {
-    const val = findByCandidates(record, valueKeys) || findFirstNumeric(record);
-    const station = findByCandidates(record, STATION_KEYS);
-    const time = findByCandidates(record, TIME_KEYS);
-    return {
-      value: val ? val.value : null,
-      station: station ? station.value : null,
-      time: time ? time.value : null,
-    };
+  // Estrae tutti i numeri (anche decimali e negativi) da una stringa tipo
+  // "61 gradi, 4.1 m/s, 4.9 m/s" -> [61, 4.1, 4.9]
+  function extractNumbers(str) {
+    if (typeof str !== 'string') return [];
+    const matches = str.match(/-?\d+(\.\d+)?/g);
+    return matches ? matches.map(Number) : [];
   }
 
   function formatTime(raw) {
     if (!raw) return null;
-    const d = new Date(raw);
+    // "2026-07-08 14:05:00" -> compatibile con Date() se sostituiamo lo spazio con "T"
+    const d = new Date(String(raw).replace(' ', 'T'));
     if (isNaN(d.getTime())) return String(raw);
     return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Sceglie la stazione preferita tra i record che hanno sia "data" che "valore" validi;
+  // se quella preferita non ha dati, prende la prima disponibile nell'array.
+  function pickRecord(json, preferStation) {
+    if (!Array.isArray(json) || json.length === 0) return null;
+    const valid = json.filter(r => r.data && r.valore);
+    if (valid.length === 0) return null;
+    const preferred = preferStation && valid.find(r => r.stazione === preferStation);
+    return preferred || valid[0];
+  }
+
+  function extractReading(record, valueIndex) {
+    if (!record) return { value: null, station: null, time: null };
+    const numbers = extractNumbers(record.valore);
+    return {
+      value: numbers.length > valueIndex ? numbers[valueIndex] : null,
+      station: record.stazione || null,
+      time: record.data || null,
+    };
   }
 
   async function fetchJson(file) {
@@ -465,16 +440,17 @@
   async function loadLivello() {
     try {
       const json = await fetchJson('livello.json');
-      const record = pickLatestRecord(json);
       document.getElementById('livello-raw').textContent = JSON.stringify(json, null, 2).slice(0, 3000);
+      const record = pickRecord(json, 'Punta Salute Canal Grande');
       if (!record) throw new Error('nessun dato');
-      const { value, station, time } = extractReading(record, ['livello','valore','value','altezza']);
+      const { value, station, time } = extractReading(record, 0); // "0.55 m" -> metri
       if (value === null) throw new Error('valore non riconosciuto');
 
-      document.getElementById('livello-value').textContent = value.toFixed(1);
+      const cm = value * 100; // il quadrante è tarato in centimetri
+      document.getElementById('livello-value').textContent = cm.toFixed(0);
       document.getElementById('livello-time').textContent =
         (station ? station + ' — ' : '') + (formatTime(time) || 'ora non disponibile');
-      updateGauge(value);
+      updateGauge(cm);
     } catch (err) {
       document.getElementById('livello-value').textContent = '—';
       document.getElementById('livello-time').textContent = 'dato non disponibile';
@@ -509,14 +485,14 @@
     try {
       const json = await fetchJson(ds.file);
       rawEl.textContent = JSON.stringify(json, null, 2).slice(0, 3000);
-      const record = pickLatestRecord(json);
-      if (!record) throw new Error('nessun dato');
-      const { value, station, time } = extractReading(record, ds.valueKeys);
+      const record = pickRecord(json, ds.preferStation);
+      if (!record) throw new Error('nessuna stazione con dati validi');
+      const { value, station, time } = extractReading(record, ds.valueIndex);
       if (value === null) {
         metaEl.innerHTML = `<span class="card-error">campo non riconosciuto — vedi dati grezzi</span>`;
         return;
       }
-      valueEl.textContent = typeof value === 'number' ? value.toFixed(1) : value;
+      valueEl.textContent = value.toFixed(1);
       metaEl.textContent = [station, formatTime(time)].filter(Boolean).join(' — ') || 'aggiornato';
     } catch (err) {
       metaEl.innerHTML = `<span class="card-error">dato non disponibile</span>`;
