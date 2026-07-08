@@ -1,0 +1,61 @@
+name: Aggiorna dati meteomarini Venezia
+
+on:
+  schedule:
+    # Ogni 15 minuti (i dati sorgente si aggiornano ogni 5 min con 3 min di ritardo)
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}  # permette di lanciarlo manualmente da GitHub
+
+permissions:
+  contents: write  # serve per poter fare il commit/push
+
+jobs:
+  fetch-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Scarica i JSON da dati.venezia.it
+        run: |
+          set -e
+          mkdir -p data
+          BASE_URL="https://dati.venezia.it/sites/default/files/dataset/opendata"
+
+          # Elenco dei dataset che vogliamo salvare (aggiungine/togline a piacere)
+          FILES=(
+            livello
+            vento
+            pressione
+            radiazione
+            tempacqua
+            umidita
+            temparia
+            onde_laguna
+            onde_mare
+            previsione
+          )
+
+          for f in "${FILES[@]}"; do
+            echo "Scarico $f.json..."
+            if curl -sL --fail --max-time 20 "$BASE_URL/$f.json" -o "data/$f.json"; then
+              echo "OK: $f.json"
+            else
+              echo "ATTENZIONE: impossibile scaricare $f.json, mantengo la versione precedente"
+            fi
+          done
+
+          # Timestamp dell'ultimo aggiornamento riuscito, utile da mostrare sul sito
+          date -u +'{"last_updated": "%Y-%m-%dT%H:%M:%SZ"}' > data/last_updated.json
+
+      - name: Commit e push (solo se qualcosa è cambiato)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "Nessun cambiamento nei dati, salto il commit."
+          else
+            git commit -m "Aggiornamento dati meteomarini $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push
+          fi
