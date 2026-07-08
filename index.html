@@ -419,12 +419,24 @@
     return matches ? matches.map(Number) : [];
   }
 
+  // I timestamp grezzi della fonte ("2026-07-08 14:05:00") sono in ora solare fissa
+  // (UTC+1) tutto l'anno, come dichiarato dal CPSM — mai ora legale. Vanno quindi
+  // interpretati con quell'offset esplicito, non come "ora locale del browser"
+  // (che d'estate sarebbe UTC+2 e sfaserebbe tutto di un'ora). Una volta letti
+  // correttamente, toLocaleString li converte da sé nel fuso di chi guarda la pagina.
+  function parseSourceTimestamp(raw) {
+    if (!raw) return NaN;
+    let iso = String(raw).trim().replace(' ', 'T');
+    const hasTimezone = /Z$|[+-]\d{2}:?\d{2}$/.test(iso);
+    if (!hasTimezone) iso += '+01:00';
+    return Date.parse(iso);
+  }
+
   function formatTime(raw) {
     if (!raw) return null;
-    // "2026-07-08 14:05:00" -> compatibile con Date() se sostituiamo lo spazio con "T"
-    const d = new Date(String(raw).replace(' ', 'T'));
-    if (isNaN(d.getTime())) return String(raw);
-    return d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const ts = parseSourceTimestamp(raw);
+    if (isNaN(ts)) return String(raw);
+    return new Date(ts).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   }
 
   // Cache dei dati già scaricati per ciascun dataset, così cambiare stazione
@@ -489,7 +501,7 @@
     const entries = [cache['livello'], ...DATASETS.map(ds => cache[ds.id])].filter(Boolean);
     entries.forEach(entry => {
       entry.valid.forEach(r => {
-        const t = Date.parse(String(r.data || '').replace(' ', 'T'));
+        const t = parseSourceTimestamp(r.data);
         if (!isNaN(t) && (maxTs === null || t > maxTs)) maxTs = t;
       });
     });
