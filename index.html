@@ -445,28 +445,40 @@
     };
   }
 
-  // Fonte diretta: chiamiamo dati.venezia.it dal browser di chi visita la pagina,
-  // invece di passare da una copia pre-scaricata. Se il browser blocca la richiesta
-  // per CORS, ritentiamo automaticamente passando da un proxy pubblico di sola lettura
-  // (i dati sono comunque pubblici e in CC-BY, quindi il rischio è minimo).
+  // Fonte diretta: chiamiamo dati.venezia.it dal browser di chi visita la pagina.
+  // Confermato che il fetch diretto è bloccato da CORS (il sito non manda l'header
+  // Access-Control-Allow-Origin), quindi proviamo in sequenza più proxy pubblici di
+  // sola lettura come rete di sicurezza — i dati sono comunque pubblici in CC-BY.
   const SOURCE_BASE = 'https://dati.venezia.it/sites/default/files/dataset/opendata';
-  const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+  const CORS_PROXIES = [
+    url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+    url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  ];
 
   async function fetchJson(file) {
     const targetUrl = `${SOURCE_BASE}/${file}?t=${Date.now()}`;
+    const errors = [];
+
     try {
       const res = await fetch(targetUrl, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
-    } catch (directErr) {
+    } catch (err) {
+      errors.push(`diretto: ${err.message}`);
+    }
+
+    for (const buildProxyUrl of CORS_PROXIES) {
       try {
-        const proxied = await fetch(`${CORS_PROXY}${encodeURIComponent(targetUrl)}`, { cache: 'no-store' });
-        if (!proxied.ok) throw new Error(`HTTP ${proxied.status}`);
-        return await proxied.json();
-      } catch (proxyErr) {
-        throw new Error(`diretto: ${directErr.message} — proxy: ${proxyErr.message}`);
+        const res = await fetch(buildProxyUrl(targetUrl), { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        errors.push(`proxy: ${err.message}`);
       }
     }
+
+    throw new Error(errors.join(' | '));
   }
 
   // Non avendo più un file last_updated.json generato da un job esterno, mostriamo
@@ -666,8 +678,9 @@
   document.getElementById('station-select').addEventListener('change', e => renderAllForStation(e.target.value));
 
   document.getElementById('refresh-btn').addEventListener('click', (e) => {
-    e.currentTarget.classList.add('spinning');
-    loadAll().finally(() => setTimeout(() => e.currentTarget.classList.remove('spinning'), 500));
+    const btn = e.currentTarget; // salvato subito: e.currentTarget diventa null dopo la fase dell'evento
+    btn.classList.add('spinning');
+    loadAll().finally(() => setTimeout(() => btn.classList.remove('spinning'), 500));
   });
 
   loadAll();
