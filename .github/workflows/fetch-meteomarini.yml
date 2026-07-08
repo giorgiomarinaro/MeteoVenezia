@@ -1,8 +1,11 @@
 name: Aggiorna dati meteomarini Venezia
+# Ultimo tocco per forzare la ri-registrazione dello schedule: 2026-07-08
 
 on:
   schedule:
-    # Ogni 15 minuti (i dati sorgente si aggiornano ogni 5 min con 3 min di ritardo)
+    # Ogni 15 minuti, ma sfalsato rispetto ai minuti tondi (0/15/30/45) che sono
+    # i più affollati sull'infrastruttura condivisa di GitHub Actions e quindi
+    # i più soggetti a ritardi. Con :07/:22/:37/:52 si evita quel picco.
     - cron: '7,22,37,52 * * * *'
   workflow_dispatch: {}  # permette di lanciarlo manualmente da GitHub
 
