@@ -691,6 +691,207 @@
     }
   }
 
+  // ---------- Previsione marea ----------
+  // A differenza degli altri dataset, previsione.json non è per-stazione: è la
+  // previsione del Centro Maree per l'intera laguna, quindi non segue la tendina
+  // di selezione stazione. Ogni record è un estremale (max/min) futuro; tra un
+  // estremale e l'altro la marea reale segue un andamento quasi sinusoidale
+  // (derivata nulla ai picchi), quindi la curva viene interpolata con un coseno
+  // invece di unire i punti con segmenti dritti.
+  const PREVISIONE_FILE = 'previsione.json';
+  const FORECAST_VB = { w: 860, h: 220, marginLeft: 34, marginRight: 14, marginTop: 26, marginBottom: 30 };
+
+  function parsePrevisioneRecord(r) {
+    const t = parseSourceTimestamp(r.DATA_ESTREMALE);
+    const v = parseFloat(r.VALORE);
+    if (isNaN(t) || isNaN(v)) return null;
+    return { t, v, type: r.TIPO_ESTREMALE };
+  }
+
+  async function loadPrevisione() {
+    const rawEl = document.getElementById('previsione-raw');
+    try {
+      const json = await fetchJson(PREVISIONE_FILE);
+      rawEl.textContent = JSON.stringify(json, null, 2).slice(0, 3000);
+      const points = (Array.isArray(json) ? json : [])
+        .map(parsePrevisioneRecord)
+        .filter(Boolean)
+        .sort((a, b) => a.t - b.t);
+      cache['previsione'] = { points };
+    } catch (err) {
+      cache['previsione'] = { points: [] };
+      rawEl.textContent = String(err);
+    }
+  }
+
+  // Valore interpolato al tempo t con transizione a coseno tra i due estremali
+  // che lo racchiudono (agli estremi la pendenza è zero, come nella marea reale).
+  function cosineValueAt(points, t) {
+    if (t <= points[0].t) return points[0].v;
+    const last = points[points.length - 1];
+    if (t >= last.t) return last.v;
+    for (let i = 1; i < points.length; i++) {
+      if (t <= points[i].t) {
+        const prev = points[i - 1], next = points[i];
+        const frac = (t - prev.t) / (next.t - prev.t);
+        return prev.v + (next.v - prev.v) * (1 - Math.cos(Math.PI * frac)) / 2;
+      }
+    }
+    return last.v;
+  }
+
+  function forecastX(t, xMin, xMax) {
+    const w = FORECAST_VB.w - FORECAST_VB.marginLeft - FORECAST_VB.marginRight;
+    return FORECAST_VB.marginLeft + ((t - xMin) / (xMax - xMin)) * w;
+  }
+
+  // Riusa la stessa scala del quadrante (-30..140 cm) così il grafico e la
+  // lancetta live si leggono con lo stesso riferimento visivo.
+  function forecastY(v) {
+    const h = FORECAST_VB.h - FORECAST_VB.marginTop - FORECAST_VB.marginBottom;
+    const percent = Math.max(0, Math.min(1, (v - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)));
+    return FORECAST_VB.marginTop + (1 - percent) * h;
+  }
+
+  function severityColor(v) {
+    if (v >= 110) return 'var(--alert)';
+    if (v >= 80) return 'var(--warn)';
+    return 'var(--brass)';
+  }
+
+  // Stato condiviso letto dal listener di hover, aggiornato a ogni render:
+  // evita di riattaccare event listener sull'svg (che verrebbero duplicati a
+  // ogni refresh, dato che loadAll gira ogni 5 minuti).
+  let forecastState = null;
+
+  function renderPrevisione() {
+    const entry = cache['previsione'];
+    const svg = document.getElementById('forecast-svg');
+    const metaEl = document.getElementById('forecast-meta');
+    const points = entry ? entry.points : [];
+
+    if (points.length < 2) {
+      forecastState = null;
+      svg.querySelectorAll(':scope > :not(title)').forEach(n => n.remove());
+      metaEl.textContent = 'previsione non disponibile al momento';
+      return;
+    }
+
+    const xMin = points[0].t, xMax = points[points.length - 1].t;
+    const now = Date.now();
+    const toX = t => forecastX(t, xMin, xMax);
+    const bottomY = forecastY(GAUGE_MIN);
+    forecastState = { points, xMin, xMax };
+
+    const parts = [];
+
+    // curva a coseno campionata a intervalli regolari
+    const SAMPLES = 240;
+    let lineD = '';
+    for (let i = 0; i <= SAMPLES; i++) {
+      const t = xMin + (xMax - xMin) * (i / SAMPLES);
+      const v = cosineValueAt(points, t);
+      lineD += `${i === 0 ? 'M' : 'L'} ${toX(t).toFixed(1)} ${forecastY(v).toFixed(1)} `;
+    }
+    const areaD = `${lineD} L ${toX(xMax).toFixed(1)} ${bottomY.toFixed(1)} L ${toX(xMin).toFixed(1)} ${bottomY.toFixed(1)} Z`;
+    parts.push(`<path class="forecast-area" d="${areaD}" />`);
+
+    // soglie di riferimento — stesse del quadrante (80 attenzione, 110 acqua alta)
+    [[80, 'forecast-threshold-warn'], [110, 'forecast-threshold-alert']].forEach(([val, cls]) => {
+      const y = forecastY(val).toFixed(1);
+      parts.push(`<line class="forecast-threshold ${cls}" x1="${FORECAST_VB.marginLeft}" y1="${y}" x2="${FORECAST_VB.w - FORECAST_VB.marginRight}" y2="${y}" />`);
+      parts.push(`<text class="forecast-axis-label" x="${FORECAST_VB.marginLeft - 6}" y="${(Number(y) + 3).toFixed(1)}" text-anchor="end">${val}</text>`);
+    });
+
+    // linea "ora", solo se il presente ricade nella finestra di previsione
+    if (now >= xMin && now <= xMax) {
+      const x = toX(now).toFixed(1);
+      parts.push(`<line class="forecast-now-line" x1="${x}" y1="${FORECAST_VB.marginTop}" x2="${x}" y2="${FORECAST_VB.h - FORECAST_VB.marginBottom}" />`);
+      parts.push(`<text class="forecast-axis-label" x="${x}" y="${FORECAST_VB.marginTop - 10}" text-anchor="middle">ora</text>`);
+    }
+
+    // divisori e etichette di giorno (a mezzanotte locale)
+    let dayCursor = new Date(xMin);
+    dayCursor.setHours(24, 0, 0, 0);
+    while (dayCursor.getTime() < xMax) {
+      const x = toX(dayCursor.getTime()).toFixed(1);
+      const label = dayCursor.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' });
+      parts.push(`<line class="forecast-threshold" x1="${x}" y1="${FORECAST_VB.marginTop}" x2="${x}" y2="${FORECAST_VB.h - FORECAST_VB.marginBottom}" opacity="0.3" />`);
+      parts.push(`<text class="forecast-axis-label" x="${x}" y="${FORECAST_VB.h - 10}" text-anchor="middle">${label}</text>`);
+      dayCursor = new Date(dayCursor.getTime() + 86400000);
+    }
+
+    parts.push(`<path class="forecast-line" d="${lineD}" />`);
+
+    // marcatori su ogni estremale; etichetta diretta solo per quelli >= 80 cm
+    // (soglia attenzione), gli altri restano leggibili solo al passaggio del mouse
+    points.forEach(p => {
+      const x = toX(p.t).toFixed(1);
+      const y = forecastY(p.v).toFixed(1);
+      parts.push(`<circle class="forecast-marker" cx="${x}" cy="${y}" r="5" fill="${severityColor(p.v)}" />`);
+      if (p.v >= 80) {
+        const dy = p.type === 'max' ? -12 : 18;
+        parts.push(`<text class="forecast-point-label" x="${x}" y="${(Number(y) + dy).toFixed(1)}" text-anchor="middle">${p.v.toFixed(0)}</text>`);
+      }
+    });
+
+    // crosshair e pallino di hover, sempre presenti ma invisibili finché inattivi
+    parts.push(`<line id="forecast-crosshair" class="forecast-crosshair" x1="0" y1="${FORECAST_VB.marginTop}" x2="0" y2="${FORECAST_VB.h - FORECAST_VB.marginBottom}" style="opacity:0" />`);
+    parts.push(`<circle id="forecast-crosshair-dot" r="4" fill="var(--ink)" stroke="var(--brass)" stroke-width="2" style="opacity:0" />`);
+
+    svg.querySelectorAll(':scope > :not(title)').forEach(n => n.remove());
+    svg.insertAdjacentHTML('beforeend', parts.join(''));
+
+    const next = points.find(p => p.t >= now) || points[points.length - 1];
+    const label = next.type === 'max' ? 'alta marea' : 'bassa marea';
+    metaEl.textContent = `prossimo estremale — ${label} ${next.v.toFixed(0)} cm alle ${formatTime(new Date(next.t).toISOString())}`;
+  }
+
+  function updateForecastCrosshair(clientX) {
+    if (!forecastState) return;
+    const svg = document.getElementById('forecast-svg');
+    const tooltip = document.getElementById('forecast-tooltip');
+    const crosshair = document.getElementById('forecast-crosshair');
+    const dot = document.getElementById('forecast-crosshair-dot');
+    if (!crosshair || !dot) return;
+
+    const rect = svg.getBoundingClientRect();
+    const scaleX = FORECAST_VB.w / rect.width;
+    const plotLeft = FORECAST_VB.marginLeft, plotRight = FORECAST_VB.w - FORECAST_VB.marginRight;
+    const svgX = Math.max(plotLeft, Math.min(plotRight, (clientX - rect.left) * scaleX));
+
+    const { points, xMin, xMax } = forecastState;
+    const t = xMin + ((svgX - plotLeft) / (plotRight - plotLeft)) * (xMax - xMin);
+    const v = cosineValueAt(points, t);
+    const y = forecastY(v);
+
+    crosshair.setAttribute('x1', svgX);
+    crosshair.setAttribute('x2', svgX);
+    crosshair.style.opacity = '1';
+    dot.setAttribute('cx', svgX);
+    dot.setAttribute('cy', y);
+    dot.style.opacity = '1';
+
+    tooltip.hidden = false;
+    tooltip.style.left = `${(svgX / FORECAST_VB.w) * rect.width}px`;
+    tooltip.style.top = `${(y / FORECAST_VB.h) * rect.height}px`;
+    const timeEl = document.createElement('span');
+    timeEl.textContent = formatTime(new Date(t).toISOString());
+    const valueEl = document.createElement('span');
+    valueEl.className = 'value';
+    valueEl.textContent = `${v.toFixed(0)} cm`;
+    tooltip.replaceChildren(timeEl, document.createElement('br'), valueEl);
+  }
+
+  function hideForecastCrosshair() {
+    const tooltip = document.getElementById('forecast-tooltip');
+    const crosshair = document.getElementById('forecast-crosshair');
+    const dot = document.getElementById('forecast-crosshair-dot');
+    if (tooltip) tooltip.hidden = true;
+    if (crosshair) crosshair.style.opacity = '0';
+    if (dot) dot.style.opacity = '0';
+  }
+
   // ---------- Schede strumenti ----------
   function buildCardShell(ds) {
     const card = document.createElement('div');
@@ -748,9 +949,9 @@
 
   async function loadAll() {
     document.getElementById('last-updated').textContent = 'aggiornamento — in corso…';
-    await loadLivello();
-    await Promise.all(DATASETS.map(loadDataset));
+    await Promise.all([loadLivello(), loadPrevisione(), ...DATASETS.map(loadDataset)]);
 
+    renderPrevisione();
     populateGlobalStationSelect();
     renderAllForStation(document.getElementById('station-select').value);
 
@@ -771,6 +972,13 @@
   // Cambiare stazione dalla tendina globale ridisegna subito tutte le schede
   // usando i dati già in cache, senza richiedere di nuovo i JSON alla rete.
   document.getElementById('station-select').addEventListener('change', e => renderAllForStation(e.target.value));
+
+  // Listener attaccati una sola volta sull'elemento svg (che non viene mai
+  // ricreato, solo il suo contenuto interno a ogni renderPrevisione): evitiamo
+  // così di accumulare listener duplicati a ogni refresh automatico.
+  const forecastSvg = document.getElementById('forecast-svg');
+  forecastSvg.addEventListener('pointermove', e => updateForecastCrosshair(e.clientX));
+  forecastSvg.addEventListener('pointerleave', hideForecastCrosshair);
 
   document.getElementById('refresh-btn').addEventListener('click', (e) => {
     const btn = e.currentTarget; // salvato subito: e.currentTarget diventa null dopo la fase dell'evento
