@@ -198,6 +198,74 @@
     margin-top: 10px;
   }
 
+  /* ---------- Forecast chart ---------- */
+  .forecast-card {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-alt) 100%);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    padding: 20px clamp(14px, 3vw, 28px) 16px;
+    margin-bottom: 22px;
+  }
+
+  .forecast-chart-wrap {
+    position: relative;
+    margin-top: 6px;
+  }
+
+  .forecast-chart {
+    width: 100%;
+    height: auto;
+    display: block;
+    touch-action: none;
+  }
+
+  .forecast-line { fill: none; stroke: var(--brass); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .forecast-area { fill: var(--brass); opacity: 0.10; }
+
+  .forecast-threshold { stroke: var(--hairline); stroke-width: 1; }
+  .forecast-threshold-warn { stroke: var(--warn); opacity: 0.5; }
+  .forecast-threshold-alert { stroke: var(--alert); opacity: 0.5; }
+
+  .forecast-now-line { stroke: var(--brass); stroke-width: 1; stroke-dasharray: 3 4; opacity: 0.7; }
+
+  .forecast-marker { stroke: var(--panel); stroke-width: 2; }
+
+  .forecast-axis-label,
+  .forecast-point-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    fill: var(--ink-dim);
+  }
+  .forecast-point-label { fill: var(--ink); }
+
+  .forecast-crosshair { stroke: var(--ink-dim); stroke-width: 1; stroke-dasharray: 2 3; pointer-events: none; }
+
+  .forecast-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--bg-deep);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-dim);
+    white-space: nowrap;
+    transform: translate(-50%, -120%);
+    z-index: 2;
+  }
+  .forecast-tooltip .value {
+    color: var(--brass);
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .forecast-meta {
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: var(--ink-dim);
+  }
+
   /* ---------- Instrument grid ---------- */
   .instrument-grid {
     display: grid;
@@ -342,6 +410,21 @@
       <button class="refresh-btn" id="refresh-btn" aria-label="Aggiorna dati" title="Aggiorna dati">↻</button>
     </div>
   </header>
+
+  <section class="forecast-card" aria-label="Previsione marea">
+    <div class="card-label">Previsione marea</div>
+    <div class="forecast-chart-wrap">
+      <svg class="forecast-chart" id="forecast-svg" viewBox="0 0 860 220" preserveAspectRatio="none" role="img" aria-labelledby="forecast-title" aria-describedby="forecast-meta">
+        <title id="forecast-title">Grafico della previsione del livello di marea nei prossimi giorni</title>
+      </svg>
+      <div class="forecast-tooltip" id="forecast-tooltip" hidden></div>
+    </div>
+    <div class="forecast-meta mono" id="forecast-meta">caricamento…</div>
+    <details class="raw">
+      <summary>dati grezzi</summary>
+      <pre id="previsione-raw">—</pre>
+    </details>
+  </section>
 
   <section class="station-bar">
     <label for="station-select" class="station-bar-label">Stazione di osservazione</label>
