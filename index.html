@@ -198,6 +198,50 @@
     margin-top: 10px;
   }
 
+  /* ---------- Quick stats (Palazzo Cavalli / Giudecca) ---------- */
+  .quick-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+
+  .quick-card {
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+
+  .quick-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin-bottom: 8px;
+  }
+
+  .quick-value {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+  }
+  .quick-value .mono {
+    font-size: 24px;
+    color: var(--ink);
+  }
+  .quick-value .unit {
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+
+  .quick-time {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--ink-dim);
+  }
+
   /* ---------- Forecast chart ---------- */
   .forecast-card {
     background: linear-gradient(180deg, var(--panel) 0%, var(--panel-alt) 100%);
@@ -410,6 +454,33 @@
       <button class="refresh-btn" id="refresh-btn" aria-label="Aggiorna dati" title="Aggiorna dati">↻</button>
     </div>
   </header>
+
+  <section class="quick-stats" aria-label="Dati rapidi">
+    <div class="quick-card">
+      <div class="quick-label">Temperatura — Palazzo Cavalli</div>
+      <div class="quick-value">
+        <span class="mono" id="quick-temp-value">—</span>
+        <span class="unit">°C</span>
+      </div>
+      <div class="quick-time mono" id="quick-temp-time">—</div>
+    </div>
+    <div class="quick-card">
+      <div class="quick-label">Umidità — Palazzo Cavalli</div>
+      <div class="quick-value">
+        <span class="mono" id="quick-umid-value">—</span>
+        <span class="unit">%</span>
+      </div>
+      <div class="quick-time mono" id="quick-umid-time">—</div>
+    </div>
+    <div class="quick-card">
+      <div class="quick-label">Marea — Punta Salute Canale Giudecca</div>
+      <div class="quick-value">
+        <span class="mono" id="quick-marea-value">—</span>
+        <span class="unit">cm</span>
+      </div>
+      <div class="quick-time mono" id="quick-marea-time">—</div>
+    </div>
+  </section>
 
   <section class="forecast-card" aria-label="Previsione marea">
     <div class="card-label">Previsione marea</div>
@@ -691,6 +762,43 @@
     }
   }
 
+  // ---------- Dati rapidi (Palazzo Cavalli / Giudecca) ----------
+  // Sezione fissa, indipendente dalla tendina globale di stazione: mostra sempre
+  // temperatura e umidità di Palazzo Cavalli e il livello marea di Punta Salute
+  // Canale Giudecca (la stazione più vicina a Punta della Dogana lato Giudecca).
+  const QUICK_STATS_STATIONS = {
+    temp: 'Palazzo Cavalli',
+    umid: 'Palazzo Cavalli',
+    marea: 'Punta Salute Canale Giudecca',
+  };
+
+  function renderQuickStatField(entry, stationName, valueIndex, valueEl, timeEl, decimals, transform) {
+    const record = entry && entry.valid.find(r => r.stazione === stationName);
+    if (!record) {
+      valueEl.textContent = '—';
+      timeEl.textContent = 'non disponibile';
+      return;
+    }
+    const { value, time } = extractReading(record, valueIndex);
+    if (value === null) {
+      valueEl.textContent = '—';
+      timeEl.textContent = 'valore non riconosciuto';
+      return;
+    }
+    const shown = transform ? transform(value) : value;
+    valueEl.textContent = shown.toFixed(decimals);
+    timeEl.textContent = formatTime(time) || 'ora non disponibile';
+  }
+
+  function renderQuickStats() {
+    renderQuickStatField(cache['temparia'], QUICK_STATS_STATIONS.temp, 0,
+      document.getElementById('quick-temp-value'), document.getElementById('quick-temp-time'), 1);
+    renderQuickStatField(cache['umidita'], QUICK_STATS_STATIONS.umid, 0,
+      document.getElementById('quick-umid-value'), document.getElementById('quick-umid-time'), 0);
+    renderQuickStatField(cache['livello'], QUICK_STATS_STATIONS.marea, 0,
+      document.getElementById('quick-marea-value'), document.getElementById('quick-marea-time'), 0, v => v * 100);
+  }
+
   // ---------- Previsione marea ----------
   // A differenza degli altri dataset, previsione.json non è per-stazione: è la
   // previsione del Centro Maree per l'intera laguna, quindi non segue la tendina
@@ -952,6 +1060,7 @@
     await Promise.all([loadLivello(), loadPrevisione(), ...DATASETS.map(loadDataset)]);
 
     renderPrevisione();
+    renderQuickStats();
     populateGlobalStationSelect();
     renderAllForStation(document.getElementById('station-select').value);
 
